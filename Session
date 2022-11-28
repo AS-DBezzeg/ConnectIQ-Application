@@ -1,0 +1,233 @@
+/* 
+  -------HOW IT WORKS--------
+
+    1. When applicatin starts, App class initializer create an ASSession object.
+        -ASSession is creating and handling the session
+        -mData is my Data class where I store the important datas for myself
+    2. App class onStop -> this is safety code, if something not working right, it
+       will stop and discard the session, so won't be problem. If no running session, these functions
+       are not working. (You will see.)
+
+    3. StartScreenDelegate: This is the button handlers of StartScreen view. 
+       START button push creates and starts the session (and switch to Graphscreen), if the conditions are true. 
+
+    4. ASSession @createSession function:
+       - at Start screen, the application collects data from my sensor, one of them is: the sensor set to outdoor or indoor and cross or road.
+         According to mData.outdoor and mData.cross I set the sport and subSport type and also the session name. 
+         (In case of indoor, I have to switch off GPS, otherwise it becomes crazy.)
+       - after I set the session parameters I create the session.  
+
+    5. ASSession @startSession, @stopSession @isRecording functions:
+       - I think pretty straight forward how they work. 
+
+    6. ASSession @saveSession @discardSession functions:
+       - when we go to Graphscreen, the session starts "automatically". If the user press START button, the application goes to "pause mode"
+         stop the session, and PauseScreen comes up asking do you want to continue, save or discard. If you choose save or discard ->
+       - Stop the session(it is already stopped, but I handle it), save the session, then set session to null, because it is an important condition
+         at session functions. Then I close the application.
+
+    7. PauseScreen @onSelectable function:
+        - these are touchable buttons(Resume, Save, Discard) on the screen.
+        - choosing Save or Discard is the only option to save/discard the session and exit from the application.
+        - IMPORTANT! before I switch to PauseScreen I stop the session.
+
+*/
+
+class ArguStressBikeApp extends Application.AppBase {
+
+    //some code not, important
+    var mSession as ASSession;
+
+    function initialize() {
+        //some code, not important
+        //Create session
+        mSession = new ASSession(mData);
+    }
+
+    //some code, not important
+    function onStop(state as Dictionary?) as Void {
+        //some code, not important
+        //Kill session
+        mSession.stopSession();
+        mSession.discardSession();
+    }
+    //some code, not important
+}
+
+class StartScreenDelegate extends WatchUi.BehaviorDelegate {
+
+    //some code, not important
+    var mSession as ASSession;
+
+    function initialize(_data as Data, _channel as AntChannel, _coords as ScreenCoordinates, _session as ASSession) {
+        //some code, not important
+        mSession = _session;
+    }
+
+    //some code, not important
+
+    function onKey(keyEvent as WatchUi.KeyEvent) as Boolean {
+        var key = keyEvent.getKey();
+
+        if(key == KEY_START) {
+            /**/
+            if(!mData.registrationError && !mData.hrZoneError && !mData.powZoneError && !mData.hrmPairingError && !mData.bikeError && !mData.hrmError) {
+                mSession.createSession();
+                mSession.startSession();
+                WatchUi.switchToView(new GraphScreenView(mData, mCoords, mChannel, mSession), new GraphScreenDelegate(mData, mChannel, mCoords, mSession), WatchUi.SLIDE_LEFT);   
+            }             
+        }
+
+        return true;
+    }
+
+   //some code, not important
+}
+
+
+
+class ASSession {
+
+    var mData as Data;
+    var mSession as ActivityRecording.Session?;
+
+    var measurementIsActive as Boolean;
+
+    function initialize(_data as Data) {
+        mData = _data;
+        measurementIsActive = false;
+    }
+
+
+    function createSession() as Void {
+
+        var sport = ActivityRecording.SPORT_CYCLING;
+        var subSport = ActivityRecording.SUB_SPORT_GENERIC;
+        var name = "Bike";
+
+        if(mData.outdoor) {
+            if(mData.cross) {
+                subSport = ActivityRecording.SUB_SPORT_MOUNTAIN;
+                name = "Mountain Biking - ArguStress";
+            } else {// road
+                subSport = ActivityRecording.SUB_SPORT_ROAD;
+                name = "Road Biking - ArguStress";
+            }
+        } else { // it is indoor
+            //Disable GPS
+            Position.enableLocationEvents(Position.LOCATION_DISABLE, method(:onPosition));
+            subSport = ActivityRecording.SUB_SPORT_INDOOR_CYCLING;
+            name = "Indoor cycling - ArguStress";
+        }
+
+        mSession = ActivityRecording.createSession({
+            :name=>name,
+            :sport=>sport,
+            :subSport=>subSport
+        });
+
+        //Reset app timer
+        mData.appTimer = 0l;
+    }
+
+    function startSession() as Void {
+        if((mSession != null) && (mSession.isRecording() == false)) {
+            System.println("Session: Start session!");
+            measurementIsActive = true;
+            mSession.start();
+        }
+    }
+
+    function stopSession() as Void {
+        if((mSession != null) && (mSession.isRecording() == true)) {
+            System.println("Session: Stop/Pause session!");
+            mSession.stop();
+        }
+    }
+
+
+    function isRecording() as Boolean {
+        if((mSession != null) && (mSession.isRecording() == true)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+
+    function saveSession() as Void {
+        if((mSession != null)) {
+            mSession.stop();
+            System.println("Session: Save session!");
+            mSession.save();
+            mSession = null;
+            measurementIsActive = false;
+            
+            System.exit();
+        }
+    }
+
+    function discardSession() as Void {
+        if((mSession != null)) {
+            mSession.stop();
+            System.println("Session: Discard session!");
+            mSession.discard();
+            mSession = null;
+            measurementIsActive = false;
+
+            System.exit();
+        }
+    }
+}
+
+
+class PauseScreenDelegate extends WatchUi.BehaviorDelegate {
+
+    var mSession as ASSession;
+    var mData as Data;
+    var mChannel as AntChannel;
+    var mCoords as ScreenCoordinates;
+    private var view as PauseScreenView;
+
+    function initialize(_data as Data, _channel as AntChannel, _coords as ScreenCoordinates, _session as ASSession, _view as PauseScreenView) {
+        BehaviorDelegate.initialize();
+        mSession = _session;
+        mChannel = _channel;
+        mData = _data;
+        mCoords = _coords;
+        view = _view;
+    }
+
+
+    //some code, not important
+
+
+    function onSelectable(event as SelectableEvent) as Boolean {
+        var instance = event.getInstance();
+        if(instance instanceof ResumeButton) {    
+            if(instance.getState() == :stateSelected) {
+                if(!mSession.isRecording()) {
+                    mSession.startSession();
+                    WatchUi.popView(WatchUi.SLIDE_DOWN);
+                } 
+            }
+        } else if(instance instanceof DiscardButton){
+            if(instance.getState() == :stateSelected) {
+                if(!mSession.isRecording()) {
+                    mSession.discardSession();
+                } 
+            }
+        } else if(instance instanceof SaveButton){
+            if(instance.getState() == :stateSelected) {
+                if(!mSession.isRecording()) {
+                    mSession.saveSession();
+                } 
+            }
+        }
+        return true;
+    }
+
+
+   //some code, not important
+
+}
